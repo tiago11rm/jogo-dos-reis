@@ -2,41 +2,70 @@
 <html lang="pt">
 <head>
     <meta charset="UTF-8">
-    <title>Jogo dos Reis - Histórico e Dama</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jogo dos Reis - TasconaBeach</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; background: #f5f6fa; padding: 20px; transition: 0.3s; }
-        .bloco { background: white; max-width: 700px; margin: 15px auto; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        button { padding: 10px 15px; font-size: 15px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; background: #3742fa; color: white; }
-        .btn-disabled { background: #ced6e0; cursor: not-allowed; opacity: 0.7; }
-        .carta-btn { background: #fff; border: 2px solid #ccc; color: black; font-weight: bold; margin: 3px; display: inline-block;}
-        .carta-selecionada { border-color: #2ed573; background: #e8f8f5; }
+        .bloco { background: white; max-width: 800px; margin: 15px auto; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        button { padding: 10px 15px; font-size: 15px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; background: #3742fa; color: white; transition: 0.2s;}
+        button:hover { background: #2731c8; }
+        input { padding: 12px; margin: 10px 0; width: 80%; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; text-align: center;}
+        
+        /* O NOVO DESIGN DAS CARTAS */
+        .carta-btn { 
+            background: #fff; 
+            border: 2px solid #ccc; 
+            color: black; 
+            font-weight: bold; 
+            margin: 5px; 
+            display: inline-block;
+            width: 80px;         /* Largura de carta real */
+            height: 120px;       /* Altura de carta real */
+            padding: 5px;
+            vertical-align: top;
+            border-radius: 8px;
+            box-shadow: 0 3px 5px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .carta-btn img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .carta-selecionada { border-color: #2ed573; background: #e8f8f5; box-shadow: 0 0 10px #2ed573; }
+        .btn-disabled { background: #ced6e0; cursor: not-allowed; opacity: 0.6; }
+        
         .trunfo-btn { background: #ffa502; font-weight: bold; }
-        .btn-rei { background: #ff4757; font-size: 24px; padding: 20px; width: 100%; box-shadow: 0 4px #c0392b; cursor: pointer; }
+        .btn-rei { background: #ff4757; font-size: 24px; padding: 20px; width: 100%; box-shadow: 0 4px #c0392b; }
         #contagem { font-size: 50px; color: #ff4757; font-weight: bold; display: none; }
         .painel-identidades { background: #2f3542; color: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .ficticia { border-color: #e1b12c; color: #e1b12c; }
         .garrafa-status { background: #2ed573; color: white; padding: 8px; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 10px; }
         #historico-copos { background: #eee; padding: 10px; border-radius: 5px; margin-top: 10px; text-align: left; display: inline-block; min-width: 250px; }
+        .erro-msg { color: #e74c3c; font-weight: bold; display: none; }
+        #ecran-jogo { display: none; }
     </style>
 </head>
 <body>
     <h1>👑 Jogo dos Reis 👑</h1>
 
-    <div id="selecao-personagem" class="bloco">
-        <h3>Quem és tu nesta aba?</h3>
-        <div id="botoes-perfis"></div>
+    <div id="ecran-login" class="bloco">
+        <h2>Bem-vindo à Tascona!</h2>
+        <p>Preenche os teus dados para entrar na mesa.</p>
+        <input type="text" id="input-nome" placeholder="O teu Nome (ex: Tiago)">
+        <input type="text" id="input-sala" placeholder="Código da Sala (ex: 1234)">
+        <p id="msg-erro" class="erro-msg">Por favor, preenche o Nome e a Sala!</p>
+        <button onclick="entrarNaMesa()" style="font-size: 18px; padding: 15px 30px; margin-top: 15px;">Entrar na Mesa</button>
     </div>
 
-    <div id="painel-jogo" class="bloco" style="display:none;">
-        <h2>Identidade: <span id="meu-nome" style="color:#3742fa;">-</span></h2>
+    <div id="ecran-jogo" class="bloco">
+        <h2>Identidade: <span id="meu-nome" style="color:#3742fa;">-</span> | Sala: <span id="minha-sala">-</span></h2>
         <hr>
-        <h3 id="status-fase">Aguardando os 4 amigos...</h3>
+        <h3 id="status-fase">Aguardando que os 4 amigos entrem nesta sala... (<span id="contagem-jogadores">1</span>/4)</h3>
         
         <div id="estado-garrafa"></div>
-        <div id="historico-copos"></div> <!-- O NOSSO QUADRO DE REGISTO -->
+        <div id="historico-copos" style="display:none;"></div>
         
         <div id="identidades-mesa" style="margin-top: 15px;"></div>
-        
         <div id="zona-acoes" style="margin-top: 20px;"></div>
         <div id="contagem">5</div>
         
@@ -47,31 +76,31 @@
     <script>
         const socket = io();
         let eu = "";
+        let sala = "";
         let meuTrunfo = "";
         let minhasCartas = [];
         let minhaIdentidade = [];
 
-        socket.on('estado_atual', (dados) => desenharBotoesSelecao(dados.lista));
-        socket.on('atualizar_lista', (lista) => desenharBotoesSelecao(lista));
+        function entrarNaMesa() {
+            eu = document.getElementById('input-nome').value.trim();
+            sala = document.getElementById('input-sala').value.trim();
 
-        function desenharBotoesSelecao(ocupados) {
-            if(eu) return;
-            const nomes = ["Tiago", "João", "Pedro", "Maria"];
-            const div = document.getElementById('botoes-perfis');
-            div.innerHTML = "";
-            nomes.forEach(n => {
-                const ocupado = ocupados.includes(n);
-                div.innerHTML += `<button onclick="escolher('${n}')" class="${ocupado?'btn-disabled':''}" ${ocupado?'disabled':''}>${n}</button>`;
-            });
+            if (!eu || !sala) { document.getElementById('msg-erro').style.display = 'block'; return; }
+
+            document.getElementById('msg-erro').style.display = 'none';
+            document.getElementById('ecran-login').style.display = 'none';
+            document.getElementById('ecran-jogo').style.display = 'block';
+            document.getElementById('meu-nome').innerText = eu;
+            document.getElementById('minha-sala').innerText = sala;
+
+            socket.emit('juntar_sala', { nome: eu, sala: sala });
         }
 
-        function escolher(nome) {
-            eu = nome;
-            document.getElementById('meu-nome').innerText = nome;
-            document.getElementById('selecao-personagem').style.display = 'none';
-            document.getElementById('painel-jogo').style.display = 'block';
-            socket.emit('entrar_como', nome);
-        }
+        socket.on('estado_atual', (dados) => {
+            if (dados.jogo && dados.jogo.fase === 'aguardando_jogadores') {
+                document.getElementById('contagem-jogadores').innerText = dados.lista.length;
+            }
+        });
 
         socket.on('proxima_fase', (jogo) => {
             const status = document.getElementById('status-fase');
@@ -82,38 +111,31 @@
             zona.innerHTML = "";
             meuTrunfo = jogo.trunfo;
 
-            // ATUALIZA O HISTÓRICO
-            if (jogo.historicoCopos.length > 0) {
+            if (jogo.historicoCopos && jogo.historicoCopos.length > 0) {
                 historico.style.display = 'inline-block';
                 historico.innerHTML = `<strong>📜 Registo:</strong><br>` + jogo.historicoCopos.join("<br>");
             } else {
                 historico.style.display = 'none';
             }
 
-            if (jogo.fase === 'turno_valete' || jogo.fase === 'turno_dama' || jogo.fase === 'turno_dama_autoriza' || jogo.fase === 'turno_alvo') {
+            if (['turno_valete', 'turno_dama', 'turno_dama_autoriza', 'turno_alvo'].includes(jogo.fase)) {
                 garrafa.innerHTML = `<div class="garrafa-status">🍺 Garrafa: ${jogo.coposBebidos} de 3 copos</div>`;
-            } else {
-                garrafa.innerHTML = "";
-            }
+            } else { garrafa.innerHTML = ""; }
 
-            // SE ACABOU TUDO!
             if (jogo.fase === 'fim_jogo') {
                 status.innerHTML = `🎉 FIM DA RODADA 🎉`;
-                zona.innerHTML = `<h3 style="color:#2ed573;">Os 4 jogos terminaram! A preparar o regresso à página inicial...</h3>`;
-                identidadesMesa.innerHTML = "";
-                document.getElementById('minhas-cartas').innerHTML = "";
-                return; // Pára aqui a execução visual
+                zona.innerHTML = `<h3 style="color:#2ed573;">Os 4 jogos terminaram! A preparar nova rodada...</h3>`;
+                identidadesMesa.innerHTML = ""; document.getElementById('minhas-cartas').innerHTML = ""; return; 
             }
 
             if (jogo.fase === 'baralhando') {
-                identidadesMesa.innerHTML = ""; 
-                document.getElementById('minhas-cartas').innerHTML = ""; 
+                identidadesMesa.innerHTML = ""; document.getElementById('minhas-cartas').innerHTML = ""; 
                 status.innerHTML = `🃏 Jogo nº ${jogo.atual + 1} de 4 | É o <strong>${jogo.baralhador}</strong> a baralhar!`;
                 if(eu === jogo.baralhador) zona.innerHTML = `<button onclick="socket.emit('acao_baralhar')">Baralhar Cartas</button>`;
             } 
             else if (jogo.fase === 'partindo') {
                 status.innerHTML = `✂️ O <strong>${jogo.partidor}</strong> vai partir.`;
-                if(eu === jogo.partidor) zona.innerHTML = `<input type="number" id="corte" value="20" min="5" max="35"><button onclick="socket.emit('acao_partir', document.getElementById('corte').value)">Cortar</button>`;
+                if(eu === jogo.partidor) zona.innerHTML = `<input type="number" id="corte" value="20" min="5" max="35" style="width: 50px;"><button onclick="socket.emit('acao_partir', document.getElementById('corte').value)">Cortar</button>`;
             } 
             else if (jogo.fase === 'dando') {
                 status.innerHTML = `🤝 O <strong>${jogo.dador}</strong> vai dar as cartas.`;
@@ -138,32 +160,35 @@
                 let htmlCartas = `<h4>A Tua Mão:</h4>`;
                 let temAlgumaValida = false;
 
+                // O MOTOR DE IMAGENS
                 minhasCartas.forEach(carta => {
                     const isReiTrunfo = carta === `Rei de ${jogo.trunfo}`;
                     const isFigura = carta.includes('Valete') || carta.includes('Dama') || carta.includes('Rei');
                     const isOutroTrunfo = !carta.includes(jogo.trunfo);
                     const isBloqueada = isReiTrunfo || (isFigura && isOutroTrunfo);
 
+                    // Transforma "Ás de Ouros" em "Ás_de_Ouros.png"
+                    const nomeFicheiro = carta.replace(/ /g, "_") + ".png";
+                    
+                    // Se não tiveres a imagem na pasta, ele substitui pelo texto normal!
+                    const tagImagem = `<img src="/cartas/${nomeFicheiro}" alt="${carta}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\\'font-size:12px;\\'>${carta}</span>';">`;
+
                     if(!isBloqueada) temAlgumaValida = true;
 
                     if (isReiTrunfo) {
-                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>👑 ${carta} (Oculto)</button>`;
-                    } else if (isFigura && isOutroTrunfo) {
-                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>🚫 ${carta}</button>`;
-                    } else {
+                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>👑<br><span style="font-size:12px;">Oculto</span></button>`;
+                    }
+                    else if (isFigura && isOutroTrunfo) {
+                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>${tagImagem}</button>`;
+                    }
+                    else {
                         const isObrigatoria = temObrigatorias.includes(carta);
                         const blockNormal = temObrigatorias.length > 0 && !isObrigatoria;
-                        
-                        htmlCartas += `<button class="carta-btn ${isObrigatoria ? 'carta-selecionada':''}" 
-                                       ${blockNormal ? 'disabled':''} 
-                                       onclick="selecionarCarta('${carta}', this)">${carta}</button>`;
+                        htmlCartas += `<button class="carta-btn ${isObrigatoria ? 'carta-selecionada':''}" ${blockNormal ? 'disabled':''} onclick="selecionarCarta('${carta}', this)">${tagImagem}</button>`;
                     }
                 });
 
-                if(!temAlgumaValida && temObrigatorias.length === 0) {
-                    htmlCartas += `<br><button class="carta-btn ficticia" onclick="selecionarCarta('Carta Fictícia', this)">🃏 Usar Carta Fictícia</button>`;
-                }
-
+                if(!temAlgumaValida && temObrigatorias.length === 0) htmlCartas += `<br><button class="carta-btn ficticia" onclick="selecionarCarta('Carta Fictícia', this)" style="width:auto; height:auto;">🃏 Usar Carta Fictícia</button>`;
                 document.getElementById('minhas-cartas').innerHTML = htmlCartas;
 
                 if(temObrigatorias.length > 0) {
@@ -176,9 +201,7 @@
             }
             else if (['turno_valete', 'turno_dama', 'turno_dama_autoriza', 'turno_alvo'].includes(jogo.fase)) {
                 let htmlPainel = `<div class="painel-identidades"><h3>Identidades Reveladas:</h3>`;
-                for(let jog in jogo.representantes) {
-                    htmlPainel += `<p><strong>${jog}</strong>: ${jogo.representantes[jog].join(" e ")}</p>`;
-                }
+                for(let jog in jogo.representantes) htmlPainel += `<p><strong>${jog}</strong>: ${jogo.representantes[jog].join(" e ")}</p>`;
                 htmlPainel += `</div>`;
                 identidadesMesa.innerHTML = htmlPainel;
 
@@ -188,50 +211,29 @@
                     if(jogo.representantes[jog].includes(`Dama de ${jogo.trunfo}`)) donoDama = jog;
                 }
 
-                // O VALETE JOGA
                 if (jogo.fase === 'turno_valete') {
                     status.innerHTML = `O Valete (${donoValete || 'Ninguém'}) comanda!`;
                     if(eu === donoValete) {
-                        zona.innerHTML = `
-                            <button onclick="socket.emit('acao_valete', {tipo: 'beber'})">🍺 Ir à procura do Rei</button>
-                            ${donoDama ? `<button onclick="socket.emit('acao_valete', {tipo: 'dama'})">👑 Oferecer à Dama</button>` : ''}
-                        `;
+                        zona.innerHTML = `<button onclick="socket.emit('acao_valete', {tipo: 'beber'})">🍺 Ir à procura do Rei</button>${donoDama ? `<button onclick="socket.emit('acao_valete', {tipo: 'dama'})">👑 Oferecer à Dama</button>` : ''}`;
                         Object.keys(jogo.representantes).forEach(jog => {
-                            if(jog !== donoValete && jog !== donoDama) {
-                                zona.innerHTML += `<button onclick="socket.emit('acao_valete', {tipo: 'outro', alvo: '${jog}'})">Oferecer a ${jog}</button>`;
-                            }
+                            if(jog !== donoValete && jog !== donoDama) zona.innerHTML += `<button onclick="socket.emit('acao_valete', {tipo: 'outro', alvo: '${jog}'})">Oferecer a ${jog}</button>`;
                         });
                     } else if (!donoValete) {
                         zona.innerHTML = `<p>O Valete não saiu. Sorteio Automático...</p>`;
                         setTimeout(() => socket.emit('rei_bate'), 2000); 
                     }
                 } 
-                // A DAMA AUTORIZA A OFERTA DO VALETE A OUTRO
                 else if (jogo.fase === 'turno_dama_autoriza') {
                     status.innerHTML = `O Valete quer oferecer a ${jogo.alvoBebida}. A Dama (${donoDama}) autoriza?`;
-                    if(eu === donoDama) {
-                        zona.innerHTML = `
-                            <button onclick="socket.emit('acao_dama_autoriza', 'passar')" style="background:#2ed573;">👍 Passar</button>
-                            <button onclick="socket.emit('acao_dama_autoriza', 'cortar')" style="background:#e1b12c;">✂️ Cortar</button>
-                        `;
-                    }
+                    if(eu === donoDama) zona.innerHTML = `<button onclick="socket.emit('acao_dama_autoriza', 'passar')" style="background:#2ed573;">👍 Passar</button><button onclick="socket.emit('acao_dama_autoriza', 'cortar')" style="background:#e1b12c;">✂️ Cortar</button>`;
                 }
-                // O ALVO RECEBEU AUTORIZAÇÃO E SÓ PODE BEBER
                 else if (jogo.fase === 'turno_alvo') {
                     status.innerHTML = `O ${jogo.alvoBebida} tem o copo na mão!`;
-                    if(eu === jogo.alvoBebida) {
-                        zona.innerHTML = `<button onclick="socket.emit('acao_alvo')">🍺 Ir à procura do Rei</button>`;
-                    }
+                    if(eu === jogo.alvoBebida) zona.innerHTML = `<button onclick="socket.emit('acao_alvo')">🍺 Ir à procura do Rei</button>`;
                 }
-                // A DAMA TEM O COPO (OFRECIDO DIRETAMENTE)
                 else if (jogo.fase === 'turno_dama') {
                     status.innerHTML = `A Dama (${donoDama}) decide o seu destino!`;
-                    if(eu === donoDama) {
-                        zona.innerHTML = `
-                            <button onclick="socket.emit('acao_dama', 'beber')">🍺 Ir à procura do Rei</button>
-                            <button onclick="socket.emit('acao_dama', 'cortar')" style="background:#e1b12c;">✂️ Cortar o Jogo</button>
-                        `;
-                    }
+                    if(eu === donoDama) zona.innerHTML = `<button onclick="socket.emit('acao_dama', 'beber')">🍺 Ir à procura do Rei</button><button onclick="socket.emit('acao_dama', 'cortar')" style="background:#e1b12c;">✂️ Cortar o Jogo</button>`;
                 }
             }
         });
@@ -240,13 +242,8 @@
             minhaIdentidade = [carta];
             document.querySelectorAll('.carta-btn').forEach(b => b.classList.remove('carta-selecionada'));
             btnElement.classList.add('carta-selecionada');
-            
             const btnConfirmar = document.getElementById('btn-confirmar');
-            if(btnConfirmar) {
-                btnConfirmar.disabled = false;
-                btnConfirmar.innerText = "Confirmar Escolha";
-                btnConfirmar.style.background = "#2ed573";
-            }
+            if(btnConfirmar) { btnConfirmar.disabled = false; btnConfirmar.innerText = "Confirmar Escolha"; btnConfirmar.style.background = "#2ed573"; }
         }
 
         window.confirmarRepresentante = function() {
@@ -258,39 +255,22 @@
             const display = document.getElementById('contagem');
             document.getElementById('zona-acoes').innerHTML = `<h3>O ${jogoAtualizado.alvoBebida} vai tentar beber o ${jogoAtualizado.coposBebidos + 1}º copo em...</h3>`;
             display.style.display = 'block';
-            
-            let segundos = 5;
-            display.innerText = segundos;
-            
-            const intervalo = setInterval(() => {
-                segundos--;
-                if(segundos > 0) display.innerText = segundos;
-                else clearInterval(intervalo);
-            }, 1000);
-
-            if(minhasCartas.includes(`Rei de ${meuTrunfo}`)) {
-                document.getElementById('zona-acoes').innerHTML += `<br><button class="btn-rei" onclick="socket.emit('rei_bate')">🤚 SOU O REI: BATER NA MESA!</button>`;
-            }
+            let segundos = 5; display.innerText = segundos;
+            const intervalo = setInterval(() => { segundos--; if(segundos > 0) display.innerText = segundos; else clearInterval(intervalo); }, 1000);
+            if(minhasCartas.includes(`Rei de ${meuTrunfo}`)) document.getElementById('zona-acoes').innerHTML += `<br><button class="btn-rei" onclick="socket.emit('rei_bate')">🤚 SOU O REI: BATER NA MESA!</button>`;
         });
 
         socket.on('rei_bateu_aviso', (dados) => {
-            document.body.style.background = "#ff4757";
-            document.body.style.color = "white";
+            document.body.style.background = "#ff4757"; document.body.style.color = "white";
             document.getElementById('contagem').style.display = 'none';
             document.getElementById('zona-acoes').innerHTML = `<h2>💥 O REI (${dados.nomeRei}) BATEU E BEBEU O COPO! 💥</h2>`;
-            
-            setTimeout(() => {
-                document.body.style.background = "#f5f6fa";
-                document.body.style.color = "black";
-            }, 4000);
+            setTimeout(() => { document.body.style.background = "#f5f6fa"; document.body.style.color = "black"; }, 4000);
         });
 
         socket.on('aviso_geral', (msg) => {
             document.getElementById('contagem').style.display = 'none';
             document.getElementById('zona-acoes').innerHTML = `<h2>${msg}</h2>`;
         });
-        
-        socket.on('erro', dados => alert(dados.mensagem));
     </script>
 </body>
 </html>
