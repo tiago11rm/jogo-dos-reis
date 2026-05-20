@@ -1,16 +1,18 @@
 const express = require('express');
+const path = require('path');
 const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 
-app.use(express.static('public'));
+// O SEGREDO DAS IMAGENS: Lê a public para o HTML, e lê a pasta 'cartas' da tua raiz!
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/cartas', express.static(path.join(__dirname, 'cartas')));
 
-// A NOSSA PRATELEIRA DE SALAS
 let salasativas = {};
 
-function criarNovoJogo() {
+function criarNovoJogo(nomeHost) {
     return {
-        atual: 0, fase: 'aguardando_jogadores',
+        atual: 0, fase: 'aguardando_jogadores', host: nomeHost,
         baralhador: '', partidor: '', dador: '', pedidor: '',
         pontoCorte: 20, trunfo: '', maos: {},
         representantes: {}, alvoBebida: '', timer: null,
@@ -20,6 +22,7 @@ function criarNovoJogo() {
 
 function gerarBaralho() {
     const naipes = ["Copas", "Ouros", "Espadas", "Paus"];
+    // REGRA DE OURO: Apenas as 40 cartas para a distribuição!
     const valores = ["2", "3", "4", "5", "6", "7", "Valete", "Dama", "Rei", "Ás"];
     let b = [];
     for (let n of naipes) for (let v of valores) b.push(`${v} de ${n}`);
@@ -33,46 +36,44 @@ function gerarBaralho() {
 function rodarPapeis(salaId) {
     let s = salasativas[salaId];
     const g = s.jogo.atual;
-    // Agora os dadores são os nomes reais que os teus amigos escreveram!
-    s.jogo.dador = s.jogadores[g];
-    s.jogo.baralhador = s.jogadores[(g + 1) % 4];
-    s.jogo.partidor = s.jogadores[(g + 2) % 4];
-    s.jogo.pedidor = s.jogadores[(g + 3) % 4];
+    const nJogadores = s.jogadores.length;
+    
+    s.jogo.dador = s.jogadores[g % nJogadores];
+    s.jogo.baralhador = s.jogadores[(g + 1) % nJogadores];
+    s.jogo.partidor = s.jogadores[(g + 2) % nJogadores];
+    s.jogo.pedidor = s.jogadores[(g + 3) % nJogadores];
     s.jogo.representantes = {};
     s.jogo.coposBebidos = 0;
     s.jogo.historicoCopos = [];
 }
 
 io.on('connection', (socket) => {
-    
-    // FUNÇÃO AUXILIAR PARA NÃO REPETIR CÓDIGO
     function obterSala() { return salasativas[socket.salaAtual]; }
 
     socket.on('juntar_sala', (dados) => {
         const { nome, sala } = dados;
         socket.nomeUsuario = nome;
         socket.salaAtual = sala;
-        socket.join(sala); // Tranca a ligação nesta sala!
+        socket.join(sala);
 
-        // Se a sala não existir, cria o tabuleiro vazio
         if (!salasativas[sala]) {
-            salasativas[sala] = { jogadores: [], jogo: criarNovoJogo(), baralho_global: [] };
+            salasativas[sala] = { jogadores: [], jogo: criarNovoJogo(nome), baralho_global: [] };
         }
 
         let s = obterSala();
-        
-        // Só deixa entrar até 4 pessoas com nomes diferentes
-        if (!s.jogadores.includes(nome) && s.jogadores.length < 4) {
+        if (!s.jogadores.includes(nome) && s.jogadores.length < 10 && s.jogo.fase === 'aguardando_jogadores') {
             s.jogadores.push(nome);
         }
 
         io.to(sala).emit('estado_atual', { jogo: s.jogo, lista: s.jogadores });
+    });
 
-        // SE CHEGARAM OS 4, ARRANCAMOS!
-        if (s.jogadores.length === 4 && s.jogo.fase === 'aguardando_jogadores') {
+    socket.on('iniciar_jogo', () => {
+        let s = obterSala(); if(!s) return;
+        if (s.jogo.host === socket.nomeUsuario && s.jogadores.length >= 2) {
             s.jogo.fase = 'baralhando';
-            rodarPapeis(sala);
-            io.to(sala).emit('proxima_fase', s.jogo);
+            rodarPapeis(socket.salaAtual);
+            io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
         }
     });
 
@@ -103,10 +104,24 @@ io.on('connection', (socket) => {
         let s = obterSala(); if(!s) return;
         s.jogo.trunfo = naipe;
         s.jogadores.forEach(j => s.jogo.maos[j] = []);
+        
         let c = 0;
+        let cartasPorPessoa = Math.floor(s.baralho_global.length / s.jogadores.length);
+        
+        // 1. Distribuição igual para todos
         s.jogadores.forEach(jogador => {
-            for(let i=0; i<10; i++) { s.jogo.maos[jogador].push(s.baralho_global[c]); c++; }
+            for(let i=0; i<cartasPorPessoa; i++) { 
+                s.jogo.maos[jogador].push(s.baralho_global[c]); 
+                c++; 
+            }
         });
+        
+        // 2. O RESTO FICA PARA O DADOR!
+        while (c < s.baralho_global.length) {
+            s.jogo.maos[s.jogo.dador].push(s.baralho_global[c]);
+            c++;
+        }
+        
         s.jogo.fase = 'escolhendo_representantes';
         io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
     });
@@ -114,72 +129,48 @@ io.on('connection', (socket) => {
     socket.on('escolher_representante', (cartas) => {
         let s = obterSala(); if(!s) return;
         s.jogo.representantes[socket.nomeUsuario] = cartas;
-        if(Object.keys(s.jogo.representantes).length === 4) {
-            s.jogo.fase = 'turno_valete';
-            io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
+        if(Object.keys(s.jogo.representantes).length === s.jogadores.length) {
+            s.jogo.fase = 'turno_valete'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
         }
     });
 
     socket.on('acao_valete', (decisao) => {
         let s = obterSala(); if(!s) return;
         if(decisao.tipo === 'beber') iniciarContagem(socket.salaAtual, socket.nomeUsuario);
-        if(decisao.tipo === 'dama') {
-            s.jogo.fase = 'turno_dama';
-            io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
-        }
+        if(decisao.tipo === 'dama') { s.jogo.fase = 'turno_dama'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo); }
         if(decisao.tipo === 'outro') {
             s.jogo.alvoBebida = decisao.alvo;
             let donoDama = Object.keys(s.jogo.representantes).find(jog => s.jogo.representantes[jog].includes(`Dama de ${s.jogo.trunfo}`));
-            if (donoDama) {
-                s.jogo.fase = 'turno_dama_autoriza';
-                io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
-            } else {
-                s.jogo.fase = 'turno_alvo';
-                io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
-            }
+            if (donoDama) { s.jogo.fase = 'turno_dama_autoriza'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo); }
+            else { s.jogo.fase = 'turno_alvo'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo); }
         }
     });
 
     socket.on('acao_dama_autoriza', (decisao) => {
         let s = obterSala(); if(!s) return;
-        if (decisao === 'passar') {
-            s.jogo.fase = 'turno_alvo';
-            io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
-        } else if (decisao === 'cortar') {
+        if (decisao === 'passar') { s.jogo.fase = 'turno_alvo'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo); }
+        else if (decisao === 'cortar') {
             io.to(socket.salaAtual).emit('aviso_geral', `✂️ A Dama cortou a oferta! Ninguém bebe.`);
-            setTimeout(() => {
-                if(!salasativas[socket.salaAtual]) return;
-                s.jogo.fase = 'turno_valete';
-                io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
-            }, 3000);
+            setTimeout(() => { if(!salasativas[socket.salaAtual]) return; s.jogo.fase = 'turno_valete'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo); }, 3000);
         }
     });
 
-    socket.on('acao_alvo', () => {
-        let s = obterSala(); if(!s) return;
-        iniciarContagem(socket.salaAtual, s.jogo.alvoBebida);
-    });
+    socket.on('acao_alvo', () => { let s = obterSala(); if(!s) return; iniciarContagem(socket.salaAtual, s.jogo.alvoBebida); });
 
     socket.on('acao_dama', (decisao) => {
         let s = obterSala(); if(!s) return;
         if(decisao === 'beber') iniciarContagem(socket.salaAtual, socket.nomeUsuario);
         if(decisao === 'cortar') {
             io.to(socket.salaAtual).emit('aviso_geral', `✂️ A Dama cortou a sua própria jogada! Ninguém bebe.`);
-            setTimeout(() => {
-                if(!salasativas[socket.salaAtual]) return;
-                s.jogo.fase = 'turno_valete';
-                io.to(socket.salaAtual).emit('proxima_fase', s.jogo);
-            }, 3000);
+            setTimeout(() => { if(!salasativas[socket.salaAtual]) return; s.jogo.fase = 'turno_valete'; io.to(socket.salaAtual).emit('proxima_fase', s.jogo); }, 3000);
         }
     });
 
     socket.on('rei_bate', () => {
         let s = obterSala(); if(!s) return;
-        clearTimeout(s.jogo.timer);
-        s.jogo.coposBebidos++;
+        clearTimeout(s.jogo.timer); s.jogo.coposBebidos++;
         s.jogo.historicoCopos.push(`${s.jogo.coposBebidos}º copo: ${socket.nomeUsuario} (Rei)`);
         io.to(socket.salaAtual).emit('rei_bateu_aviso', { nomeRei: socket.nomeUsuario, copos: s.jogo.coposBebidos });
-
         setTimeout(() => {
             if(!salasativas[socket.salaAtual]) return;
             if (s.jogo.coposBebidos >= 3) proximoJogo(socket.salaAtual);
@@ -189,31 +180,24 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         if (socket.salaAtual && salasativas[socket.salaAtual]) {
-            const sala = socket.salaAtual;
-            let s = salasativas[sala];
+            const sala = socket.salaAtual; let s = salasativas[sala];
             s.jogadores = s.jogadores.filter(j => j !== socket.nomeUsuario);
             io.to(sala).emit('estado_atual', { jogo: s.jogo, lista: s.jogadores });
-            
-            if (s.jogadores.length === 0) {
-                delete salasativas[sala]; // Apaga a sala da memória se saírem todos
-            }
+            if (s.jogadores.length === 0) delete salasativas[sala];
         }
     });
 });
 
 function iniciarContagem(salaId, nomeAlvo) {
     let s = salasativas[salaId]; if(!s) return;
-    s.jogo.alvoBebida = nomeAlvo;
-    s.jogo.fase = 'contagem';
+    s.jogo.alvoBebida = nomeAlvo; s.jogo.fase = 'contagem';
     io.to(salaId).emit('iniciar_contagem', s.jogo);
-
     s.jogo.timer = setTimeout(() => {
         if(!salasativas[salaId]) return;
         s.jogo.coposBebidos++;
         let papel = s.jogo.representantes[nomeAlvo].join(" / ");
         s.jogo.historicoCopos.push(`${s.jogo.coposBebidos}º copo: ${nomeAlvo} (${papel})`);
         io.to(salaId).emit('aviso_geral', `🍻 Saúde! O ${nomeAlvo} bebeu!`);
-
         setTimeout(() => {
             if(!salasativas[salaId]) return;
             if (s.jogo.coposBebidos >= 3) proximoJogo(salaId);
@@ -225,15 +209,12 @@ function iniciarContagem(salaId, nomeAlvo) {
 function proximoJogo(salaId) {
     let s = salasativas[salaId]; if(!s) return;
     s.jogo.atual++;
-    if (s.jogo.atual >= 4) {
-        s.jogo.fase = 'fim_jogo';
-        io.to(salaId).emit('proxima_fase', s.jogo);
+    if (s.jogo.atual >= s.jogadores.length) { 
+        s.jogo.fase = 'fim_jogo'; io.to(salaId).emit('proxima_fase', s.jogo);
     } else {
-        s.jogo.fase = 'baralhando';
-        rodarPapeis(salaId);
-        io.to(salaId).emit('proxima_fase', s.jogo);
+        s.jogo.fase = 'baralhando'; rodarPapeis(salaId); io.to(salaId).emit('proxima_fase', s.jogo);
     }
 }
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => console.log(`Servidor de Salas ativo na porta ${PORT}`));
+http.listen(PORT, () => console.log(`Servidor ativo na porta ${PORT}`));

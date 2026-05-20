@@ -11,30 +11,14 @@
         button:hover { background: #2731c8; }
         input { padding: 12px; margin: 10px 0; width: 80%; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; text-align: center;}
         
-        /* O NOVO DESIGN DAS CARTAS */
         .carta-btn { 
-            background: #fff; 
-            border: 2px solid #ccc; 
-            color: black; 
-            font-weight: bold; 
-            margin: 5px; 
-            display: inline-block;
-            width: 80px;         /* Largura de carta real */
-            height: 120px;       /* Altura de carta real */
-            padding: 5px;
-            vertical-align: top;
-            border-radius: 8px;
-            box-shadow: 0 3px 5px rgba(0,0,0,0.1);
-            overflow: hidden;
+            background: #fff; border: 2px solid #ccc; color: black; font-weight: bold; margin: 5px; 
+            display: inline-block; width: 80px; height: 120px; padding: 5px; vertical-align: top;
+            border-radius: 8px; box-shadow: 0 3px 5px rgba(0,0,0,0.1); overflow: hidden;
         }
-        .carta-btn img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
+        .carta-btn img { width: 100%; height: 100%; object-fit: contain; }
         .carta-selecionada { border-color: #2ed573; background: #e8f8f5; box-shadow: 0 0 10px #2ed573; }
         .btn-disabled { background: #ced6e0; cursor: not-allowed; opacity: 0.6; }
-        
         .trunfo-btn { background: #ffa502; font-weight: bold; }
         .btn-rei { background: #ff4757; font-size: 24px; padding: 20px; width: 100%; box-shadow: 0 4px #c0392b; }
         #contagem { font-size: 50px; color: #ff4757; font-weight: bold; display: none; }
@@ -50,7 +34,6 @@
 
     <div id="ecran-login" class="bloco">
         <h2>Bem-vindo à Tascona!</h2>
-        <p>Preenche os teus dados para entrar na mesa.</p>
         <input type="text" id="input-nome" placeholder="O teu Nome (ex: Tiago)">
         <input type="text" id="input-sala" placeholder="Código da Sala (ex: 1234)">
         <p id="msg-erro" class="erro-msg">Por favor, preenche o Nome e a Sala!</p>
@@ -60,63 +43,72 @@
     <div id="ecran-jogo" class="bloco">
         <h2>Identidade: <span id="meu-nome" style="color:#3742fa;">-</span> | Sala: <span id="minha-sala">-</span></h2>
         <hr>
-        <h3 id="status-fase">Aguardando que os 4 amigos entrem nesta sala... (<span id="contagem-jogadores">1</span>/4)</h3>
+        <div id="painel-anfitriao" style="display:none; background:#e8f8f5; padding:15px; border-radius:8px; margin-bottom:15px; border:2px solid #2ed573;">
+            <h3>Tu és o Anfitrião da Sala!</h3>
+            <p>Estão <span id="contador-amigos">1</span> jogadores na mesa.</p>
+            <button id="btn-iniciar" onclick="socket.emit('iniciar_jogo')" style="background:#2ed573; font-size:20px; padding:15px;" disabled>Aguardando mais 1 amigo...</button>
+        </div>
+        
+        <h3 id="status-fase">A entrar na sala...</h3>
         
         <div id="estado-garrafa"></div>
         <div id="historico-copos" style="display:none;"></div>
-        
         <div id="identidades-mesa" style="margin-top: 15px;"></div>
         <div id="zona-acoes" style="margin-top: 20px;"></div>
         <div id="contagem">5</div>
-        
         <div id="minhas-cartas" style="margin-top:30px; border-top:2px solid #eee; padding-top:15px;"></div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
-        let eu = "";
-        let sala = "";
-        let meuTrunfo = "";
-        let minhasCartas = [];
-        let minhaIdentidade = [];
+        let eu = ""; let sala = ""; let meuTrunfo = ""; let minhasCartas = []; let minhaIdentidade = [];
 
         function entrarNaMesa() {
             eu = document.getElementById('input-nome').value.trim();
             sala = document.getElementById('input-sala').value.trim();
-
             if (!eu || !sala) { document.getElementById('msg-erro').style.display = 'block'; return; }
-
             document.getElementById('msg-erro').style.display = 'none';
             document.getElementById('ecran-login').style.display = 'none';
             document.getElementById('ecran-jogo').style.display = 'block';
             document.getElementById('meu-nome').innerText = eu;
             document.getElementById('minha-sala').innerText = sala;
-
             socket.emit('juntar_sala', { nome: eu, sala: sala });
         }
 
         socket.on('estado_atual', (dados) => {
             if (dados.jogo && dados.jogo.fase === 'aguardando_jogadores') {
-                document.getElementById('contagem-jogadores').innerText = dados.lista.length;
+                document.getElementById('status-fase').innerText = "Aguardando o Anfitrião iniciar o jogo...";
+                
+                // Se eu for o Host, mostro o painel de controlo
+                if(dados.jogo.host === eu) {
+                    document.getElementById('painel-anfitriao').style.display = 'block';
+                    document.getElementById('contador-amigos').innerText = dados.lista.length;
+                    
+                    let btn = document.getElementById('btn-iniciar');
+                    if(dados.lista.length >= 2) {
+                        btn.disabled = false;
+                        btn.innerText = `Começar Jogo com ${dados.lista.length} Pessoas!`;
+                    } else {
+                        btn.disabled = true;
+                        btn.innerText = "Aguardando mais 1 amigo...";
+                    }
+                }
             }
         });
 
         socket.on('proxima_fase', (jogo) => {
+            document.getElementById('painel-anfitriao').style.display = 'none';
             const status = document.getElementById('status-fase');
             const zona = document.getElementById('zona-acoes');
             const identidadesMesa = document.getElementById('identidades-mesa');
             const garrafa = document.getElementById('estado-garrafa');
             const historico = document.getElementById('historico-copos');
-            zona.innerHTML = "";
-            meuTrunfo = jogo.trunfo;
+            zona.innerHTML = ""; meuTrunfo = jogo.trunfo;
 
             if (jogo.historicoCopos && jogo.historicoCopos.length > 0) {
-                historico.style.display = 'inline-block';
-                historico.innerHTML = `<strong>📜 Registo:</strong><br>` + jogo.historicoCopos.join("<br>");
-            } else {
-                historico.style.display = 'none';
-            }
+                historico.style.display = 'inline-block'; historico.innerHTML = `<strong>📜 Registo:</strong><br>` + jogo.historicoCopos.join("<br>");
+            } else { historico.style.display = 'none'; }
 
             if (['turno_valete', 'turno_dama', 'turno_dama_autoriza', 'turno_alvo'].includes(jogo.fase)) {
                 garrafa.innerHTML = `<div class="garrafa-status">🍺 Garrafa: ${jogo.coposBebidos} de 3 copos</div>`;
@@ -124,13 +116,13 @@
 
             if (jogo.fase === 'fim_jogo') {
                 status.innerHTML = `🎉 FIM DA RODADA 🎉`;
-                zona.innerHTML = `<h3 style="color:#2ed573;">Os 4 jogos terminaram! A preparar nova rodada...</h3>`;
+                zona.innerHTML = `<h3 style="color:#2ed573;">O jogo terminou! Preparem a próxima mesa...</h3>`;
                 identidadesMesa.innerHTML = ""; document.getElementById('minhas-cartas').innerHTML = ""; return; 
             }
 
             if (jogo.fase === 'baralhando') {
                 identidadesMesa.innerHTML = ""; document.getElementById('minhas-cartas').innerHTML = ""; 
-                status.innerHTML = `🃏 Jogo nº ${jogo.atual + 1} de 4 | É o <strong>${jogo.baralhador}</strong> a baralhar!`;
+                status.innerHTML = `🃏 É o <strong>${jogo.baralhador}</strong> a baralhar!`;
                 if(eu === jogo.baralhador) zona.innerHTML = `<button onclick="socket.emit('acao_baralhar')">Baralhar Cartas</button>`;
             } 
             else if (jogo.fase === 'partindo') {
@@ -144,9 +136,7 @@
             else if (jogo.fase === 'trunfo') {
                 status.innerHTML = `📣 O <strong>${jogo.pedidor}</strong> escolhe o Trunfo!`;
                 if(eu === jogo.pedidor) {
-                    ['Copas','Ouros','Espadas','Paus'].forEach(n => {
-                        zona.innerHTML += `<button class="trunfo-btn" onclick="socket.emit('acao_trunfo','${n}')">${n}</button>`;
-                    });
+                    ['Copas','Ouros','Espadas','Paus'].forEach(n => { zona.innerHTML += `<button class="trunfo-btn" onclick="socket.emit('acao_trunfo','${n}')">${n}</button>`; });
                 }
             }
             else if (jogo.fase === 'escolhendo_representantes') {
@@ -160,27 +150,22 @@
                 let htmlCartas = `<h4>A Tua Mão:</h4>`;
                 let temAlgumaValida = false;
 
-                // O MOTOR DE IMAGENS
                 minhasCartas.forEach(carta => {
                     const isReiTrunfo = carta === `Rei de ${jogo.trunfo}`;
                     const isFigura = carta.includes('Valete') || carta.includes('Dama') || carta.includes('Rei');
                     const isOutroTrunfo = !carta.includes(jogo.trunfo);
                     const isBloqueada = isReiTrunfo || (isFigura && isOutroTrunfo);
 
-                    // Transforma "Ás de Ouros" em "Ás_de_Ouros.png"
+                    // GPS Seguro para a Imagem 
                     const nomeFicheiro = carta.replace(/ /g, "_") + ".png";
+                    const urlImagem = "cartas/" + encodeURIComponent(nomeFicheiro);
                     
-                    // Se não tiveres a imagem na pasta, ele substitui pelo texto normal!
-                    const tagImagem = `<img src="/cartas/${nomeFicheiro}" alt="${carta}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\\'font-size:12px;\\'>${carta}</span>';">`;
+                    const tagImagem = `<img src="${urlImagem}" alt="${carta}" onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\\'font-size:12px;\\'>${carta}</span>';">`;
 
                     if(!isBloqueada) temAlgumaValida = true;
 
-                    if (isReiTrunfo) {
-                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>👑<br><span style="font-size:12px;">Oculto</span></button>`;
-                    }
-                    else if (isFigura && isOutroTrunfo) {
-                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>${tagImagem}</button>`;
-                    }
+                    if (isReiTrunfo) { htmlCartas += `<button class="carta-btn btn-disabled" disabled>👑<br><span style="font-size:12px;">Oculto</span></button>`; }
+                    else if (isFigura && isOutroTrunfo) { htmlCartas += `<button class="carta-btn btn-disabled" disabled>${tagImagem}</button>`; }
                     else {
                         const isObrigatoria = temObrigatorias.includes(carta);
                         const blockNormal = temObrigatorias.length > 0 && !isObrigatoria;
@@ -219,8 +204,7 @@
                             if(jog !== donoValete && jog !== donoDama) zona.innerHTML += `<button onclick="socket.emit('acao_valete', {tipo: 'outro', alvo: '${jog}'})">Oferecer a ${jog}</button>`;
                         });
                     } else if (!donoValete) {
-                        zona.innerHTML = `<p>O Valete não saiu. Sorteio Automático...</p>`;
-                        setTimeout(() => socket.emit('rei_bate'), 2000); 
+                        zona.innerHTML = `<p>O Valete não saiu. Sorteio Automático...</p>`; setTimeout(() => socket.emit('rei_bate'), 2000); 
                     }
                 } 
                 else if (jogo.fase === 'turno_dama_autoriza') {
@@ -247,8 +231,7 @@
         }
 
         window.confirmarRepresentante = function() {
-            document.getElementById('zona-acoes').innerHTML = "Aguardando os outros...";
-            socket.emit('escolher_representante', minhaIdentidade);
+            document.getElementById('zona-acoes').innerHTML = "Aguardando os outros..."; socket.emit('escolher_representante', minhaIdentidade);
         }
 
         socket.on('iniciar_contagem', (jogoAtualizado) => {
@@ -268,8 +251,7 @@
         });
 
         socket.on('aviso_geral', (msg) => {
-            document.getElementById('contagem').style.display = 'none';
-            document.getElementById('zona-acoes').innerHTML = `<h2>${msg}</h2>`;
+            document.getElementById('contagem').style.display = 'none'; document.getElementById('zona-acoes').innerHTML = `<h2>${msg}</h2>`;
         });
     </script>
 </body>
