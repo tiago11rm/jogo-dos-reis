@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <title>Jogo dos Reis - Histórico e Dama</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f5f6fa; padding: 20px; transition: 0.3s; }
+        .bloco { background: white; max-width: 700px; margin: 15px auto; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        button { padding: 10px 15px; font-size: 15px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; background: #3742fa; color: white; }
+        .btn-disabled { background: #ced6e0; cursor: not-allowed; opacity: 0.7; }
+        .carta-btn { background: #fff; border: 2px solid #ccc; color: black; font-weight: bold; margin: 3px; display: inline-block;}
+        .carta-selecionada { border-color: #2ed573; background: #e8f8f5; }
+        .trunfo-btn { background: #ffa502; font-weight: bold; }
+        .btn-rei { background: #ff4757; font-size: 24px; padding: 20px; width: 100%; box-shadow: 0 4px #c0392b; cursor: pointer; }
+        #contagem { font-size: 50px; color: #ff4757; font-weight: bold; display: none; }
+        .painel-identidades { background: #2f3542; color: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .ficticia { border-color: #e1b12c; color: #e1b12c; }
+        .garrafa-status { background: #2ed573; color: white; padding: 8px; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 10px; }
+        #historico-copos { background: #eee; padding: 10px; border-radius: 5px; margin-top: 10px; text-align: left; display: inline-block; min-width: 250px; }
+    </style>
+</head>
+<body>
+    <h1>👑 Jogo dos Reis 👑</h1>
+
+    <div id="selecao-personagem" class="bloco">
+        <h3>Quem és tu nesta aba?</h3>
+        <div id="botoes-perfis"></div>
+    </div>
+
+    <div id="painel-jogo" class="bloco" style="display:none;">
+        <h2>Identidade: <span id="meu-nome" style="color:#3742fa;">-</span></h2>
+        <hr>
+        <h3 id="status-fase">Aguardando os 4 amigos...</h3>
+        
+        <div id="estado-garrafa"></div>
+        <div id="historico-copos"></div> <!-- O NOSSO QUADRO DE REGISTO -->
+        
+        <div id="identidades-mesa" style="margin-top: 15px;"></div>
+        
+        <div id="zona-acoes" style="margin-top: 20px;"></div>
+        <div id="contagem">5</div>
+        
+        <div id="minhas-cartas" style="margin-top:30px; border-top:2px solid #eee; padding-top:15px;"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let eu = "";
+        let meuTrunfo = "";
+        let minhasCartas = [];
+        let minhaIdentidade = [];
+
+        socket.on('estado_atual', (dados) => desenharBotoesSelecao(dados.lista));
+        socket.on('atualizar_lista', (lista) => desenharBotoesSelecao(lista));
+
+        function desenharBotoesSelecao(ocupados) {
+            if(eu) return;
+            const nomes = ["Tiago", "João", "Pedro", "Maria"];
+            const div = document.getElementById('botoes-perfis');
+            div.innerHTML = "";
+            nomes.forEach(n => {
+                const ocupado = ocupados.includes(n);
+                div.innerHTML += `<button onclick="escolher('${n}')" class="${ocupado?'btn-disabled':''}" ${ocupado?'disabled':''}>${n}</button>`;
+            });
+        }
+
+        function escolher(nome) {
+            eu = nome;
+            document.getElementById('meu-nome').innerText = nome;
+            document.getElementById('selecao-personagem').style.display = 'none';
+            document.getElementById('painel-jogo').style.display = 'block';
+            socket.emit('entrar_como', nome);
+        }
+
+        socket.on('proxima_fase', (jogo) => {
+            const status = document.getElementById('status-fase');
+            const zona = document.getElementById('zona-acoes');
+            const identidadesMesa = document.getElementById('identidades-mesa');
+            const garrafa = document.getElementById('estado-garrafa');
+            const historico = document.getElementById('historico-copos');
+            zona.innerHTML = "";
+            meuTrunfo = jogo.trunfo;
+
+            // ATUALIZA O HISTÓRICO
+            if (jogo.historicoCopos.length > 0) {
+                historico.style.display = 'inline-block';
+                historico.innerHTML = `<strong>📜 Registo:</strong><br>` + jogo.historicoCopos.join("<br>");
+            } else {
+                historico.style.display = 'none';
+            }
+
+            if (jogo.fase === 'turno_valete' || jogo.fase === 'turno_dama' || jogo.fase === 'turno_dama_autoriza' || jogo.fase === 'turno_alvo') {
+                garrafa.innerHTML = `<div class="garrafa-status">🍺 Garrafa: ${jogo.coposBebidos} de 3 copos</div>`;
+            } else {
+                garrafa.innerHTML = "";
+            }
+
+            // SE ACABOU TUDO!
+            if (jogo.fase === 'fim_jogo') {
+                status.innerHTML = `🎉 FIM DA RODADA 🎉`;
+                zona.innerHTML = `<h3 style="color:#2ed573;">Os 4 jogos terminaram! A preparar o regresso à página inicial...</h3>`;
+                identidadesMesa.innerHTML = "";
+                document.getElementById('minhas-cartas').innerHTML = "";
+                return; // Pára aqui a execução visual
+            }
+
+            if (jogo.fase === 'baralhando') {
+                identidadesMesa.innerHTML = ""; 
+                document.getElementById('minhas-cartas').innerHTML = ""; 
+                status.innerHTML = `🃏 Jogo nº ${jogo.atual + 1} de 4 | É o <strong>${jogo.baralhador}</strong> a baralhar!`;
+                if(eu === jogo.baralhador) zona.innerHTML = `<button onclick="socket.emit('acao_baralhar')">Baralhar Cartas</button>`;
+            } 
+            else if (jogo.fase === 'partindo') {
+                status.innerHTML = `✂️ O <strong>${jogo.partidor}</strong> vai partir.`;
+                if(eu === jogo.partidor) zona.innerHTML = `<input type="number" id="corte" value="20" min="5" max="35"><button onclick="socket.emit('acao_partir', document.getElementById('corte').value)">Cortar</button>`;
+            } 
+            else if (jogo.fase === 'dando') {
+                status.innerHTML = `🤝 O <strong>${jogo.dador}</strong> vai dar as cartas.`;
+                if(eu === jogo.dador) zona.innerHTML = `<button onclick="socket.emit('acao_dar')">Distribuir</button>`;
+            } 
+            else if (jogo.fase === 'trunfo') {
+                status.innerHTML = `📣 O <strong>${jogo.pedidor}</strong> escolhe o Trunfo!`;
+                if(eu === jogo.pedidor) {
+                    ['Copas','Ouros','Espadas','Paus'].forEach(n => {
+                        zona.innerHTML += `<button class="trunfo-btn" onclick="socket.emit('acao_trunfo','${n}')">${n}</button>`;
+                    });
+                }
+            }
+            else if (jogo.fase === 'escolhendo_representantes') {
+                minhasCartas = jogo.maos[eu];
+                status.innerHTML = `Trunfo: <strong>${jogo.trunfo}</strong>. Escolhe o teu representante!`;
+                
+                let temObrigatorias = [];
+                if(minhasCartas.includes(`Valete de ${jogo.trunfo}`)) temObrigatorias.push(`Valete de ${jogo.trunfo}`);
+                if(minhasCartas.includes(`Dama de ${jogo.trunfo}`)) temObrigatorias.push(`Dama de ${jogo.trunfo}`);
+
+                let htmlCartas = `<h4>A Tua Mão:</h4>`;
+                let temAlgumaValida = false;
+
+                minhasCartas.forEach(carta => {
+                    const isReiTrunfo = carta === `Rei de ${jogo.trunfo}`;
+                    const isFigura = carta.includes('Valete') || carta.includes('Dama') || carta.includes('Rei');
+                    const isOutroTrunfo = !carta.includes(jogo.trunfo);
+                    const isBloqueada = isReiTrunfo || (isFigura && isOutroTrunfo);
+
+                    if(!isBloqueada) temAlgumaValida = true;
+
+                    if (isReiTrunfo) {
+                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>👑 ${carta} (Oculto)</button>`;
+                    } else if (isFigura && isOutroTrunfo) {
+                        htmlCartas += `<button class="carta-btn btn-disabled" disabled>🚫 ${carta}</button>`;
+                    } else {
+                        const isObrigatoria = temObrigatorias.includes(carta);
+                        const blockNormal = temObrigatorias.length > 0 && !isObrigatoria;
+                        
+                        htmlCartas += `<button class="carta-btn ${isObrigatoria ? 'carta-selecionada':''}" 
+                                       ${blockNormal ? 'disabled':''} 
+                                       onclick="selecionarCarta('${carta}', this)">${carta}</button>`;
+                    }
+                });
+
+                if(!temAlgumaValida && temObrigatorias.length === 0) {
+                    htmlCartas += `<br><button class="carta-btn ficticia" onclick="selecionarCarta('Carta Fictícia', this)">🃏 Usar Carta Fictícia</button>`;
+                }
+
+                document.getElementById('minhas-cartas').innerHTML = htmlCartas;
+
+                if(temObrigatorias.length > 0) {
+                    minhaIdentidade = temObrigatorias;
+                    zona.innerHTML = `<button onclick="confirmarRepresentante()" style="background:#2ed573;">Confirmar Obrigatória</button>`;
+                } else {
+                    minhaIdentidade = [];
+                    zona.innerHTML = `<button id="btn-confirmar" onclick="confirmarRepresentante()" disabled>Escolhe 1 carta abaixo</button>`;
+                }
+            }
+            else if (['turno_valete', 'turno_dama', 'turno_dama_autoriza', 'turno_alvo'].includes(jogo.fase)) {
+                let htmlPainel = `<div class="painel-identidades"><h3>Identidades Reveladas:</h3>`;
+                for(let jog in jogo.representantes) {
+                    htmlPainel += `<p><strong>${jog}</strong>: ${jogo.representantes[jog].join(" e ")}</p>`;
+                }
+                htmlPainel += `</div>`;
+                identidadesMesa.innerHTML = htmlPainel;
+
+                let donoValete = "", donoDama = "";
+                for(let jog in jogo.representantes) {
+                    if(jogo.representantes[jog].includes(`Valete de ${jogo.trunfo}`)) donoValete = jog;
+                    if(jogo.representantes[jog].includes(`Dama de ${jogo.trunfo}`)) donoDama = jog;
+                }
+
+                // O VALETE JOGA
+                if (jogo.fase === 'turno_valete') {
+                    status.innerHTML = `O Valete (${donoValete || 'Ninguém'}) comanda!`;
+                    if(eu === donoValete) {
+                        zona.innerHTML = `
+                            <button onclick="socket.emit('acao_valete', {tipo: 'beber'})">🍺 Ir à procura do Rei</button>
+                            ${donoDama ? `<button onclick="socket.emit('acao_valete', {tipo: 'dama'})">👑 Oferecer à Dama</button>` : ''}
+                        `;
+                        Object.keys(jogo.representantes).forEach(jog => {
+                            if(jog !== donoValete && jog !== donoDama) {
+                                zona.innerHTML += `<button onclick="socket.emit('acao_valete', {tipo: 'outro', alvo: '${jog}'})">Oferecer a ${jog}</button>`;
+                            }
+                        });
+                    } else if (!donoValete) {
+                        zona.innerHTML = `<p>O Valete não saiu. Sorteio Automático...</p>`;
+                        setTimeout(() => socket.emit('rei_bate'), 2000); 
+                    }
+                } 
+                // A DAMA AUTORIZA A OFERTA DO VALETE A OUTRO
+                else if (jogo.fase === 'turno_dama_autoriza') {
+                    status.innerHTML = `O Valete quer oferecer a ${jogo.alvoBebida}. A Dama (${donoDama}) autoriza?`;
+                    if(eu === donoDama) {
+                        zona.innerHTML = `
+                            <button onclick="socket.emit('acao_dama_autoriza', 'passar')" style="background:#2ed573;">👍 Passar</button>
+                            <button onclick="socket.emit('acao_dama_autoriza', 'cortar')" style="background:#e1b12c;">✂️ Cortar</button>
+                        `;
+                    }
+                }
+                // O ALVO RECEBEU AUTORIZAÇÃO E SÓ PODE BEBER
+                else if (jogo.fase === 'turno_alvo') {
+                    status.innerHTML = `O ${jogo.alvoBebida} tem o copo na mão!`;
+                    if(eu === jogo.alvoBebida) {
+                        zona.innerHTML = `<button onclick="socket.emit('acao_alvo')">🍺 Ir à procura do Rei</button>`;
+                    }
+                }
+                // A DAMA TEM O COPO (OFRECIDO DIRETAMENTE)
+                else if (jogo.fase === 'turno_dama') {
+                    status.innerHTML = `A Dama (${donoDama}) decide o seu destino!`;
+                    if(eu === donoDama) {
+                        zona.innerHTML = `
+                            <button onclick="socket.emit('acao_dama', 'beber')">🍺 Ir à procura do Rei</button>
+                            <button onclick="socket.emit('acao_dama', 'cortar')" style="background:#e1b12c;">✂️ Cortar o Jogo</button>
+                        `;
+                    }
+                }
+            }
+        });
+
+        window.selecionarCarta = function(carta, btnElement) {
+            minhaIdentidade = [carta];
+            document.querySelectorAll('.carta-btn').forEach(b => b.classList.remove('carta-selecionada'));
+            btnElement.classList.add('carta-selecionada');
+            
+            const btnConfirmar = document.getElementById('btn-confirmar');
+            if(btnConfirmar) {
+                btnConfirmar.disabled = false;
+                btnConfirmar.innerText = "Confirmar Escolha";
+                btnConfirmar.style.background = "#2ed573";
+            }
+        }
+
+        window.confirmarRepresentante = function() {
+            document.getElementById('zona-acoes').innerHTML = "Aguardando os outros...";
+            socket.emit('escolher_representante', minhaIdentidade);
+        }
+
+        socket.on('iniciar_contagem', (jogoAtualizado) => {
+            const display = document.getElementById('contagem');
+            document.getElementById('zona-acoes').innerHTML = `<h3>O ${jogoAtualizado.alvoBebida} vai tentar beber o ${jogoAtualizado.coposBebidos + 1}º copo em...</h3>`;
+            display.style.display = 'block';
+            
+            let segundos = 5;
+            display.innerText = segundos;
+            
+            const intervalo = setInterval(() => {
+                segundos--;
+                if(segundos > 0) display.innerText = segundos;
+                else clearInterval(intervalo);
+            }, 1000);
+
+            if(minhasCartas.includes(`Rei de ${meuTrunfo}`)) {
+                document.getElementById('zona-acoes').innerHTML += `<br><button class="btn-rei" onclick="socket.emit('rei_bate')">🤚 SOU O REI: BATER NA MESA!</button>`;
+            }
+        });
+
+        socket.on('rei_bateu_aviso', (dados) => {
+            document.body.style.background = "#ff4757";
+            document.body.style.color = "white";
+            document.getElementById('contagem').style.display = 'none';
+            document.getElementById('zona-acoes').innerHTML = `<h2>💥 O REI (${dados.nomeRei}) BATEU E BEBEU O COPO! 💥</h2>`;
+            
+            setTimeout(() => {
+                document.body.style.background = "#f5f6fa";
+                document.body.style.color = "black";
+            }, 4000);
+        });
+
+        socket.on('aviso_geral', (msg) => {
+            document.getElementById('contagem').style.display = 'none';
+            document.getElementById('zona-acoes').innerHTML = `<h2>${msg}</h2>`;
+        });
+        
+        socket.on('erro', dados => alert(dados.mensagem));
+    </script>
+</body>
+</html>
